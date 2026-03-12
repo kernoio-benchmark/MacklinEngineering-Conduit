@@ -1,3 +1,5 @@
+# Multi-stage Dockerfile for Node.js TypeScript application
+
 # Build stage
 FROM node:20-alpine AS builder
 
@@ -6,16 +8,23 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install all dependencies (including devDependencies for build), ignoring prepare script
-RUN npm ci --ignore-scripts
+# Copy tsconfig.json for build
+COPY tsconfig.json ./
 
-# Copy source code and configuration files
+# Copy all source code and config files (needed before npm ci due to prepare script)
+COPY src ./src
+COPY config ./config
+
+# Install all dependencies (including devDependencies for build)
+RUN npm ci
+
+# Copy remaining files
 COPY . .
 
 # Build the application
 RUN npm run build
 
-# Production stage
+# Production stage - using ts-node as per npm start
 FROM node:20-alpine AS production
 
 WORKDIR /app
@@ -23,21 +32,25 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install only production dependencies, ignoring scripts to avoid prepare hook
-RUN npm ci --only=production --ignore-scripts && \
+# Copy tsconfig.json from builder
+COPY --from=builder /app/tsconfig.json ./
+
+# Install all dependencies (ts-node requires TypeScript and other dev deps)
+RUN npm ci --ignore-scripts && \
     npm cache clean --force
 
-# Copy built application from builder stage
-COPY --from=builder /app/build ./build
+# Copy source files
+COPY src ./src
+COPY config ./config
 
-# Copy swagger.yaml if it exists
-COPY swagger.yaml ./swagger.yaml
+# Copy swagger.yaml from builder
+COPY --from=builder /app/swagger.yaml ./swagger.yaml
 
 # Set NODE_ENV to production
 ENV NODE_ENV=production
 
-# Expose port (common default, adjust if needed)
+# Expose port (common default for Node.js apps)
 EXPOSE 3000
 
-# Run the compiled application
-CMD ["node", "build/src/app.js"]
+# Run using npm start as documented
+CMD ["npm", "start"]
