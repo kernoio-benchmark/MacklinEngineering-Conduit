@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  couchbase:
+    image: couchbase:community-7.2.0
+    ports:
+      - "8091-8096:8091-8096"
+      - "11210:11210"
+    environment:
+      - CLUSTER_NAME=test-cluster
+      - COUCHBASE_ADMINISTRATOR_USERNAME=${DB_USERNAME}
+      - COUCHBASE_ADMINISTRATOR_PASSWORD=${DB_PASSWORD}
+      - COUCHBASE_BUCKET=${DB_BUCKET}
+      - COUCHBASE_BUCKET_RAMSIZE=512
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8091/pools"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 40s
+    volumes:
+      - couchbase-data:/opt/couchbase/var
+
+  sut:
+    build:
+      context: ${BUILD_CONTEXT}
+      dockerfile_inline: |
+        FROM node:20-alpine
+
+        WORKDIR /app
+
+        # Copy package files
+        COPY package*.json ./
+
+        # Install all dependencies including dev dependencies for ts-node
+        RUN npm ci --ignore-scripts && \
+            npm cache clean --force
+
+        # Copy source code and configuration files
+        COPY . .
+
+        # Set NODE_ENV to production
+        ENV NODE_ENV=production
+
+        # Expose port
+        EXPOSE 3000
+
+        # Run the application using node with ts-node ESM loader
+        CMD ["node", "--loader", "ts-node/esm", "src/app.ts"]
+    depends_on:
+      couchbase:
+        condition: service_healthy
+    env_file:
+      - .env
+    ports:
+      - "3000:3000"
+    labels:
+      - "jwt-signing-config=HS256:this_is_a_secret_meeting_all_requirements_of_any_hs_algorithms"
+
+volumes:
+  couchbase-data:
