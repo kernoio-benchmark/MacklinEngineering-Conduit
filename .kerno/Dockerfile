@@ -1,56 +1,48 @@
-# Multi-stage Dockerfile for Node.js TypeScript application
+# Multi-stage Dockerfile for Node.js/TypeScript application
 
 # Build stage
-FROM node:20-alpine AS builder
+FROM node:18-alpine AS builder
 
 WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
 
-# Copy tsconfig.json for build
+# Copy TypeScript configuration
 COPY tsconfig.json ./
 
-# Copy all source code and config files (needed before npm ci due to prepare script)
-COPY src ./src
-COPY config ./config
+# Install all dependencies (including devDependencies for build), ignoring prepare script
+RUN npm ci --ignore-scripts
 
-# Install all dependencies (including devDependencies for build)
-RUN npm ci
-
-# Copy remaining files
+# Copy source code and configuration files
 COPY . .
 
-# Build the application
-RUN npm run build
+# Compile TypeScript to JavaScript
+RUN npm run compile
 
-# Production stage - using ts-node as per npm start
-FROM node:20-alpine AS production
+# Production stage
+FROM node:18-alpine AS production
 
 WORKDIR /app
 
 # Copy package files
 COPY package*.json ./
 
-# Copy tsconfig.json from builder
-COPY --from=builder /app/tsconfig.json ./
-
-# Install all dependencies (ts-node requires TypeScript and other dev deps)
-RUN npm ci --ignore-scripts && \
+# Install only production dependencies, ignoring scripts to avoid prepare hook
+RUN npm ci --only=production --ignore-scripts && \
     npm cache clean --force
 
-# Copy source files
-COPY src ./src
-COPY config ./config
+# Copy compiled build artifacts from builder stage
+COPY --from=builder /app/build ./build
 
-# Copy swagger.yaml from builder
-COPY --from=builder /app/swagger.yaml ./swagger.yaml
+# Copy swagger.yaml (required for Swagger UI)
+COPY swagger.yaml ./
+
+# Expose port (default Node.js port, adjust if needed)
+EXPOSE 3000
 
 # Set NODE_ENV to production
 ENV NODE_ENV=production
 
-# Expose port (common default for Node.js apps)
-EXPOSE 3000
-
-# Run using npm start as documented
-CMD ["npm", "start"]
+# Run the application using the compiled JavaScript
+CMD ["node", "build/src/app.js"]
